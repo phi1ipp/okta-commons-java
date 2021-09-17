@@ -30,6 +30,7 @@ import okhttp3.MediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.ResponseBody
+import okio.Buffer
 import org.testng.Assert
 import org.testng.annotations.DataProvider
 import org.testng.annotations.Test
@@ -182,6 +183,41 @@ class OkHttpRequestExecutorTest {
         assertThat "HttpException.isRetryable expected to be false for: IOException", !HttpException.isRetryable()
 
         verify(requestAuthenticator).authenticate(request)
+    }
+
+    @Test
+    void testInputStreamRequestBodyContentLength() {
+        String content = "my-content"
+        InputStream body = new ByteArrayInputStream(content.getBytes())
+        def inputStreamRequestBody = new OkHttpRequestExecutor.InputStreamRequestBody(body, com.okta.commons.http.MediaType.TEXT_PLAIN)
+        assertThat(inputStreamRequestBody.contentLength(), is((long) content.length()))
+    }
+
+    // https://github.com/okta/okta-oidc-android/issues/264
+    @Test
+    void testInputStreamRequestBodyCanBeReadTwice() {
+        String content = "my-content"
+        InputStream body = new ByteArrayInputStream(content.getBytes())
+        def inputStreamRequestBody = new OkHttpRequestExecutor.InputStreamRequestBody(body, com.okta.commons.http.MediaType.TEXT_PLAIN)
+        def buffer = new Buffer()
+
+        assertThat(inputStreamRequestBody.contentLength(), is((long) content.length()))
+        inputStreamRequestBody.writeTo(buffer)
+        assertThat(buffer.readUtf8(), is(content))
+
+        assertThat(inputStreamRequestBody.contentLength(), is((long) content.length()))
+        inputStreamRequestBody.writeTo(buffer)
+        assertThat(buffer.readUtf8(), is(content))
+    }
+
+    @Test
+    void testNullInputStreamRequestBody() {
+        def inputStreamRequestBody = new OkHttpRequestExecutor.InputStreamRequestBody(null, com.okta.commons.http.MediaType.TEXT_PLAIN)
+        def buffer = new Buffer()
+
+        assertThat(inputStreamRequestBody.contentLength(), is(-1L))
+        inputStreamRequestBody.writeTo(buffer)
+        assertThat(buffer.readUtf8(), is(emptyString()))
     }
 
     @DataProvider
