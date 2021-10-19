@@ -57,6 +57,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -176,11 +177,37 @@ public class HttpClientRequestExecutor implements RequestExecutor {
 
         try {
             httpResponse = httpClient.execute(httpRequest);
+
+            if (httpResponse.getAllHeaders() != null &&
+                Arrays
+                    .stream(httpResponse.getAllHeaders())
+                    .anyMatch(hdr ->
+                        Arrays
+                            .stream(hdr.getElements())
+                            .anyMatch(he -> he.getName().equalsIgnoreCase("x-rate-limit-limit")))) {
+
+                final String limit = httpResponse.getHeaders("X-Rate-Limit-Limit")[0].getElements()[0].getValue();
+                final String remaining = httpResponse.getHeaders("X-Rate-Limit-Remaining")[0].getElements()[0].getValue();
+                final String reset = httpResponse.getHeaders("X-Rate-Limit-Reset")[0].getElements()[0].getValue();
+
+                final int iLimit = Integer.parseInt(limit);
+                final int iRemaining = Integer.parseInt(remaining);
+                final long lReset = Long.parseLong(reset);
+
+                final int reserve =
+                    this.getRequestExecutorParam("reservedCapacity", "Percent of rate preserved for other clients", 0);
+
+                if (iRemaining/(float)iLimit < reserve/100.)
+                    Thread.sleep(20_000);
+            }
+
             return toSdkResponse(httpResponse);
         } catch (SocketException | SocketTimeoutException | NoHttpResponseException | ConnectTimeoutException e) {
             throw new HttpException("Unable to execute HTTP request - retryable exception: " + e.getMessage(), e, true);
         } catch (IOException e) {
             throw new HttpException("Unable to execute HTTP request: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            throw new HttpException("Interrupted exception: " + e.getMessage(), e);
         } finally {
             try {
                 httpResponse.getEntity().getContent().close();
